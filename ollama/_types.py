@@ -4,7 +4,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any, Mapping, Optional, Union, Sequence
 
-from pydantic.json_schema import JsonSchemaValue
 from typing_extensions import Annotated, Literal
 
 from pydantic import (
@@ -18,87 +17,16 @@ from pydantic import (
 
 class SubscriptableBaseModel(BaseModel):
   def __getitem__(self, key: str) -> Any:
-    """
-    >>> msg = Message(role='user')
-    >>> msg['role']
-    'user'
-    >>> msg = Message(role='user')
-    >>> msg['nonexistent']
-    Traceback (most recent call last):
-    KeyError: 'nonexistent'
-    """
-    if key in self:
-      return getattr(self, key)
-
-    raise KeyError(key)
+    return getattr(self, key)
 
   def __setitem__(self, key: str, value: Any) -> None:
-    """
-    >>> msg = Message(role='user')
-    >>> msg['role'] = 'assistant'
-    >>> msg['role']
-    'assistant'
-    >>> tool_call = Message.ToolCall(function=Message.ToolCall.Function(name='foo', arguments={}))
-    >>> msg = Message(role='user', content='hello')
-    >>> msg['tool_calls'] = [tool_call]
-    >>> msg['tool_calls'][0]['function']['name']
-    'foo'
-    """
     setattr(self, key, value)
 
   def __contains__(self, key: str) -> bool:
-    """
-    >>> msg = Message(role='user')
-    >>> 'nonexistent' in msg
-    False
-    >>> 'role' in msg
-    True
-    >>> 'content' in msg
-    False
-    >>> msg.content = 'hello!'
-    >>> 'content' in msg
-    True
-    >>> msg = Message(role='user', content='hello!')
-    >>> 'content' in msg
-    True
-    >>> 'tool_calls' in msg
-    False
-    >>> msg['tool_calls'] = []
-    >>> 'tool_calls' in msg
-    True
-    >>> msg['tool_calls'] = [Message.ToolCall(function=Message.ToolCall.Function(name='foo', arguments={}))]
-    >>> 'tool_calls' in msg
-    True
-    >>> msg['tool_calls'] = None
-    >>> 'tool_calls' in msg
-    True
-    >>> tool = Tool()
-    >>> 'type' in tool
-    True
-    """
-    if key in self.model_fields_set:
-      return True
-
-    if key in self.model_fields:
-      return self.model_fields[key].default is not None
-
-    return False
+    return hasattr(self, key)
 
   def get(self, key: str, default: Any = None) -> Any:
-    """
-    >>> msg = Message(role='user')
-    >>> msg.get('role')
-    'user'
-    >>> msg = Message(role='user')
-    >>> msg.get('nonexistent')
-    >>> msg = Message(role='user')
-    >>> msg.get('nonexistent', 'default')
-    'default'
-    >>> msg = Message(role='user', tool_calls=[ Message.ToolCall(function=Message.ToolCall.Function(name='foo', arguments={}))])
-    >>> msg.get('tool_calls')[0]['function']['name']
-    'foo'
-    """
-    return self[key] if key in self else default
+    return getattr(self, key, default)
 
 
 class Options(SubscriptableBaseModel):
@@ -151,7 +79,7 @@ class BaseGenerateRequest(BaseStreamableRequest):
   options: Optional[Union[Mapping[str, Any], Options]] = None
   'Options to use for the request.'
 
-  format: Optional[Union[Literal['', 'json'], JsonSchemaValue]] = None
+  format: Optional[Literal['', 'json']] = None
   'Format of the response.'
 
   keep_alive: Optional[Union[float, str]] = None
@@ -167,14 +95,9 @@ class Image(BaseModel):
       return b64encode(self.value.read_bytes() if isinstance(self.value, Path) else self.value).decode()
 
     if isinstance(self.value, str):
-      try:
-        if Path(self.value).exists():
-          return b64encode(Path(self.value).read_bytes()).decode()
-      except Exception:
-        # Long base64 string can't be wrapped in Path, so try to treat as base64 string
-        pass
+      if Path(self.value).exists():
+        return b64encode(Path(self.value).read_bytes()).decode()
 
-      # String might be a file path, but might not exist
       if self.value.split('.')[-1] in ('png', 'jpg', 'jpeg', 'webp'):
         raise ValueError(f'File {self.value} does not exist')
 

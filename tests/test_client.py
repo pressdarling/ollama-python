@@ -1,17 +1,15 @@
-import base64
 import os
+import io
 import json
-from pydantic import ValidationError, BaseModel
+from pydantic import ValidationError
 import pytest
 import tempfile
 from pathlib import Path
 from pytest_httpserver import HTTPServer, URIPattern
 from werkzeug.wrappers import Request, Response
+from PIL import Image
 
 from ollama._client import Client, AsyncClient, _copy_tools
-
-PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC'
-PNG_BYTES = base64.b64decode(PNG_BASE64)
 
 
 class PrefixPattern(URIPattern):
@@ -88,11 +86,7 @@ def test_client_chat_stream(httpserver: HTTPServer):
     assert part['message']['content'] == next(it)
 
 
-@pytest.mark.parametrize('message_format', ('dict', 'pydantic_model'))
-@pytest.mark.parametrize('file_style', ('path', 'bytes'))
-def test_client_chat_images(httpserver: HTTPServer, message_format: str, file_style: str, tmp_path):
-  from ollama._types import Message, Image
-
+def test_client_chat_images(httpserver: HTTPServer):
   httpserver.expect_ordered_request(
     '/api/chat',
     method='POST',
@@ -102,7 +96,7 @@ def test_client_chat_images(httpserver: HTTPServer, message_format: str, file_st
         {
           'role': 'user',
           'content': 'Why is the sky blue?',
-          'images': [PNG_BASE64],
+          'images': ['iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC'],
         },
       ],
       'tools': [],
@@ -120,146 +114,12 @@ def test_client_chat_images(httpserver: HTTPServer, message_format: str, file_st
 
   client = Client(httpserver.url_for('/'))
 
-  if file_style == 'bytes':
-    image_content = PNG_BYTES
-  elif file_style == 'path':
-    image_path = tmp_path / 'transparent.png'
-    image_path.write_bytes(PNG_BYTES)
-    image_content = str(image_path)
-
-  if message_format == 'pydantic_model':
-    messages = [Message(role='user', content='Why is the sky blue?', images=[Image(value=image_content)])]
-  elif message_format == 'dict':
-    messages = [{'role': 'user', 'content': 'Why is the sky blue?', 'images': [image_content]}]
-  else:
-    raise ValueError(f'Invalid message format: {message_format}')
-
-  response = client.chat('dummy', messages=messages)
-  assert response['model'] == 'dummy'
-  assert response['message']['role'] == 'assistant'
-  assert response['message']['content'] == "I don't know."
-
-
-def test_client_chat_format_json(httpserver: HTTPServer):
-  httpserver.expect_ordered_request(
-    '/api/chat',
-    method='POST',
-    json={
-      'model': 'dummy',
-      'messages': [{'role': 'user', 'content': 'Why is the sky blue?'}],
-      'tools': [],
-      'format': 'json',
-      'stream': False,
-    },
-  ).respond_with_json(
-    {
-      'model': 'dummy',
-      'message': {
-        'role': 'assistant',
-        'content': '{"answer": "Because of Rayleigh scattering"}',
-      },
-    }
-  )
-
-  client = Client(httpserver.url_for('/'))
-  response = client.chat('dummy', messages=[{'role': 'user', 'content': 'Why is the sky blue?'}], format='json')
-  assert response['model'] == 'dummy'
-  assert response['message']['role'] == 'assistant'
-  assert response['message']['content'] == '{"answer": "Because of Rayleigh scattering"}'
-
-
-def test_client_chat_format_pydantic(httpserver: HTTPServer):
-  class ResponseFormat(BaseModel):
-    answer: str
-    confidence: float
-
-  httpserver.expect_ordered_request(
-    '/api/chat',
-    method='POST',
-    json={
-      'model': 'dummy',
-      'messages': [{'role': 'user', 'content': 'Why is the sky blue?'}],
-      'tools': [],
-      'format': {'title': 'ResponseFormat', 'type': 'object', 'properties': {'answer': {'title': 'Answer', 'type': 'string'}, 'confidence': {'title': 'Confidence', 'type': 'number'}}, 'required': ['answer', 'confidence']},
-      'stream': False,
-    },
-  ).respond_with_json(
-    {
-      'model': 'dummy',
-      'message': {
-        'role': 'assistant',
-        'content': '{"answer": "Because of Rayleigh scattering", "confidence": 0.95}',
-      },
-    }
-  )
-
-  client = Client(httpserver.url_for('/'))
-  response = client.chat('dummy', messages=[{'role': 'user', 'content': 'Why is the sky blue?'}], format=ResponseFormat.model_json_schema())
-  assert response['model'] == 'dummy'
-  assert response['message']['role'] == 'assistant'
-  assert response['message']['content'] == '{"answer": "Because of Rayleigh scattering", "confidence": 0.95}'
-
-
-@pytest.mark.asyncio
-async def test_async_client_chat_format_json(httpserver: HTTPServer):
-  httpserver.expect_ordered_request(
-    '/api/chat',
-    method='POST',
-    json={
-      'model': 'dummy',
-      'messages': [{'role': 'user', 'content': 'Why is the sky blue?'}],
-      'tools': [],
-      'format': 'json',
-      'stream': False,
-    },
-  ).respond_with_json(
-    {
-      'model': 'dummy',
-      'message': {
-        'role': 'assistant',
-        'content': '{"answer": "Because of Rayleigh scattering"}',
-      },
-    }
-  )
-
-  client = AsyncClient(httpserver.url_for('/'))
-  response = await client.chat('dummy', messages=[{'role': 'user', 'content': 'Why is the sky blue?'}], format='json')
-  assert response['model'] == 'dummy'
-  assert response['message']['role'] == 'assistant'
-  assert response['message']['content'] == '{"answer": "Because of Rayleigh scattering"}'
-
-
-@pytest.mark.asyncio
-async def test_async_client_chat_format_pydantic(httpserver: HTTPServer):
-  class ResponseFormat(BaseModel):
-    answer: str
-    confidence: float
-
-  httpserver.expect_ordered_request(
-    '/api/chat',
-    method='POST',
-    json={
-      'model': 'dummy',
-      'messages': [{'role': 'user', 'content': 'Why is the sky blue?'}],
-      'tools': [],
-      'format': {'title': 'ResponseFormat', 'type': 'object', 'properties': {'answer': {'title': 'Answer', 'type': 'string'}, 'confidence': {'title': 'Confidence', 'type': 'number'}}, 'required': ['answer', 'confidence']},
-      'stream': False,
-    },
-  ).respond_with_json(
-    {
-      'model': 'dummy',
-      'message': {
-        'role': 'assistant',
-        'content': '{"answer": "Because of Rayleigh scattering", "confidence": 0.95}',
-      },
-    }
-  )
-
-  client = AsyncClient(httpserver.url_for('/'))
-  response = await client.chat('dummy', messages=[{'role': 'user', 'content': 'Why is the sky blue?'}], format=ResponseFormat.model_json_schema())
-  assert response['model'] == 'dummy'
-  assert response['message']['role'] == 'assistant'
-  assert response['message']['content'] == '{"answer": "Because of Rayleigh scattering", "confidence": 0.95}'
+  with io.BytesIO() as b:
+    Image.new('RGB', (1, 1)).save(b, 'PNG')
+    response = client.chat('dummy', messages=[{'role': 'user', 'content': 'Why is the sky blue?', 'images': [b.getvalue()]}])
+    assert response['model'] == 'dummy'
+    assert response['message']['role'] == 'assistant'
+    assert response['message']['content'] == "I don't know."
 
 
 def test_client_generate(httpserver: HTTPServer):
@@ -327,7 +187,7 @@ def test_client_generate_images(httpserver: HTTPServer):
       'model': 'dummy',
       'prompt': 'Why is the sky blue?',
       'stream': False,
-      'images': [PNG_BASE64],
+      'images': ['iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC'],
     },
   ).respond_with_json(
     {
@@ -339,113 +199,10 @@ def test_client_generate_images(httpserver: HTTPServer):
   client = Client(httpserver.url_for('/'))
 
   with tempfile.NamedTemporaryFile() as temp:
-    temp.write(PNG_BYTES)
-    temp.flush()
+    Image.new('RGB', (1, 1)).save(temp, 'PNG')
     response = client.generate('dummy', 'Why is the sky blue?', images=[temp.name])
     assert response['model'] == 'dummy'
     assert response['response'] == 'Because it is.'
-
-
-def test_client_generate_format_json(httpserver: HTTPServer):
-  httpserver.expect_ordered_request(
-    '/api/generate',
-    method='POST',
-    json={
-      'model': 'dummy',
-      'prompt': 'Why is the sky blue?',
-      'format': 'json',
-      'stream': False,
-    },
-  ).respond_with_json(
-    {
-      'model': 'dummy',
-      'response': '{"answer": "Because of Rayleigh scattering"}',
-    }
-  )
-
-  client = Client(httpserver.url_for('/'))
-  response = client.generate('dummy', 'Why is the sky blue?', format='json')
-  assert response['model'] == 'dummy'
-  assert response['response'] == '{"answer": "Because of Rayleigh scattering"}'
-
-
-def test_client_generate_format_pydantic(httpserver: HTTPServer):
-  class ResponseFormat(BaseModel):
-    answer: str
-    confidence: float
-
-  httpserver.expect_ordered_request(
-    '/api/generate',
-    method='POST',
-    json={
-      'model': 'dummy',
-      'prompt': 'Why is the sky blue?',
-      'format': {'title': 'ResponseFormat', 'type': 'object', 'properties': {'answer': {'title': 'Answer', 'type': 'string'}, 'confidence': {'title': 'Confidence', 'type': 'number'}}, 'required': ['answer', 'confidence']},
-      'stream': False,
-    },
-  ).respond_with_json(
-    {
-      'model': 'dummy',
-      'response': '{"answer": "Because of Rayleigh scattering", "confidence": 0.95}',
-    }
-  )
-
-  client = Client(httpserver.url_for('/'))
-  response = client.generate('dummy', 'Why is the sky blue?', format=ResponseFormat.model_json_schema())
-  assert response['model'] == 'dummy'
-  assert response['response'] == '{"answer": "Because of Rayleigh scattering", "confidence": 0.95}'
-
-
-@pytest.mark.asyncio
-async def test_async_client_generate_format_json(httpserver: HTTPServer):
-  httpserver.expect_ordered_request(
-    '/api/generate',
-    method='POST',
-    json={
-      'model': 'dummy',
-      'prompt': 'Why is the sky blue?',
-      'format': 'json',
-      'stream': False,
-    },
-  ).respond_with_json(
-    {
-      'model': 'dummy',
-      'response': '{"answer": "Because of Rayleigh scattering"}',
-    }
-  )
-
-  client = AsyncClient(httpserver.url_for('/'))
-  response = await client.generate('dummy', 'Why is the sky blue?', format='json')
-  assert response['model'] == 'dummy'
-  assert response['response'] == '{"answer": "Because of Rayleigh scattering"}'
-
-
-@pytest.mark.asyncio
-async def test_async_client_generate_format_pydantic(httpserver: HTTPServer):
-  class ResponseFormat(BaseModel):
-    answer: str
-    confidence: float
-
-  httpserver.expect_ordered_request(
-    '/api/generate',
-    method='POST',
-    json={
-      'model': 'dummy',
-      'prompt': 'Why is the sky blue?',
-      'format': {'title': 'ResponseFormat', 'type': 'object', 'properties': {'answer': {'title': 'Answer', 'type': 'string'}, 'confidence': {'title': 'Confidence', 'type': 'number'}}, 'required': ['answer', 'confidence']},
-      'stream': False,
-    },
-  ).respond_with_json(
-    {
-      'model': 'dummy',
-      'response': '{"answer": "Because of Rayleigh scattering", "confidence": 0.95}',
-    }
-  )
-
-  client = AsyncClient(httpserver.url_for('/'))
-  response = await client.generate('dummy', 'Why is the sky blue?', format=ResponseFormat.model_json_schema())
-  assert response['model'] == 'dummy'
-  assert response['response'] == '{"answer": "Because of Rayleigh scattering", "confidence": 0.95}'
 
 
 def test_client_pull(httpserver: HTTPServer):
@@ -811,7 +568,7 @@ async def test_async_client_chat_images(httpserver: HTTPServer):
         {
           'role': 'user',
           'content': 'Why is the sky blue?',
-          'images': [PNG_BASE64],
+          'images': ['iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC'],
         },
       ],
       'tools': [],
@@ -829,10 +586,12 @@ async def test_async_client_chat_images(httpserver: HTTPServer):
 
   client = AsyncClient(httpserver.url_for('/'))
 
-  response = await client.chat('dummy', messages=[{'role': 'user', 'content': 'Why is the sky blue?', 'images': [PNG_BYTES]}])
-  assert response['model'] == 'dummy'
-  assert response['message']['role'] == 'assistant'
-  assert response['message']['content'] == "I don't know."
+  with io.BytesIO() as b:
+    Image.new('RGB', (1, 1)).save(b, 'PNG')
+    response = await client.chat('dummy', messages=[{'role': 'user', 'content': 'Why is the sky blue?', 'images': [b.getvalue()]}])
+    assert response['model'] == 'dummy'
+    assert response['message']['role'] == 'assistant'
+    assert response['message']['content'] == "I don't know."
 
 
 @pytest.mark.asyncio
@@ -903,7 +662,7 @@ async def test_async_client_generate_images(httpserver: HTTPServer):
       'model': 'dummy',
       'prompt': 'Why is the sky blue?',
       'stream': False,
-      'images': [PNG_BASE64],
+      'images': ['iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC'],
     },
   ).respond_with_json(
     {
@@ -915,8 +674,7 @@ async def test_async_client_generate_images(httpserver: HTTPServer):
   client = AsyncClient(httpserver.url_for('/'))
 
   with tempfile.NamedTemporaryFile() as temp:
-    temp.write(PNG_BYTES)
-    temp.flush()
+    Image.new('RGB', (1, 1)).save(temp, 'PNG')
     response = await client.generate('dummy', 'Why is the sky blue?', images=[temp.name])
     assert response['model'] == 'dummy'
     assert response['response'] == 'Because it is.'
