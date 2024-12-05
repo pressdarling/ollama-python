@@ -1,24 +1,25 @@
 from pathlib import Path
 from pydantic import BaseModel
-from typing import Literal
+from typing import List, Optional, Literal
 from ollama import chat
+from rich import print
 
 
 # Define the schema for image objects
 class Object(BaseModel):
   name: str
   confidence: float
-  attributes: str
+  attributes: Optional[dict] = None
 
 
 class ImageDescription(BaseModel):
   summary: str
-  objects: list[Object]
+  objects: List[Object]
   scene: str
-  colors: list[str]
+  colors: List[str]
   time_of_day: Literal['Morning', 'Afternoon', 'Evening', 'Night']
   setting: Literal['Indoor', 'Outdoor', 'Unknown']
-  text_content: str | None = None
+  text_content: Optional[str] = None
 
 
 # Get path from user input

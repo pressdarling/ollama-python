@@ -188,7 +188,7 @@ class Client(BaseClient):
     context: Optional[Sequence[int]] = None,
     stream: Literal[False] = False,
     raw: bool = False,
-    format: Optional[Union[Literal['', 'json'], JsonSchemaValue]] = None,
+    format: Optional[Union[Literal['json'], JsonSchemaValue]] = None,
     images: Optional[Sequence[Union[str, bytes]]] = None,
     options: Optional[Union[Mapping[str, Any], Options]] = None,
     keep_alive: Optional[Union[float, str]] = None,
@@ -206,7 +206,7 @@ class Client(BaseClient):
     context: Optional[Sequence[int]] = None,
     stream: Literal[True] = True,
     raw: bool = False,
-    format: Optional[Union[Literal['', 'json'], JsonSchemaValue]] = None,
+    format: Optional[Union[Literal['json'], JsonSchemaValue]] = None,
     images: Optional[Sequence[Union[str, bytes]]] = None,
     options: Optional[Union[Mapping[str, Any], Options]] = None,
     keep_alive: Optional[Union[float, str]] = None,
@@ -223,7 +223,7 @@ class Client(BaseClient):
     context: Optional[Sequence[int]] = None,
     stream: bool = False,
     raw: Optional[bool] = None,
-    format: Optional[Union[Literal['', 'json'], JsonSchemaValue]] = None,
+    format: Optional[Union[Literal['json'], JsonSchemaValue]] = None,
     images: Optional[Sequence[Union[str, bytes]]] = None,
     options: Optional[Union[Mapping[str, Any], Options]] = None,
     keep_alive: Optional[Union[float, str]] = None,
@@ -252,7 +252,7 @@ class Client(BaseClient):
         stream=stream,
         raw=raw,
         format=format,
-        images=[image for image in _copy_images(images)] if images else None,
+        images=[Image(value=image) for image in images] if images else None,
         options=options,
         keep_alive=keep_alive,
       ).model_dump(exclude_none=True),
@@ -267,7 +267,7 @@ class Client(BaseClient):
     *,
     tools: Optional[Sequence[Union[Mapping[str, Any], Tool, Callable]]] = None,
     stream: Literal[False] = False,
-    format: Optional[Union[Literal['', 'json'], JsonSchemaValue]] = None,
+    format: Optional[Union[Literal['json'], JsonSchemaValue]] = None,
     options: Optional[Union[Mapping[str, Any], Options]] = None,
     keep_alive: Optional[Union[float, str]] = None,
   ) -> ChatResponse: ...
@@ -280,7 +280,7 @@ class Client(BaseClient):
     *,
     tools: Optional[Sequence[Union[Mapping[str, Any], Tool, Callable]]] = None,
     stream: Literal[True] = True,
-    format: Optional[Union[Literal['', 'json'], JsonSchemaValue]] = None,
+    format: Optional[Union[Literal['json'], JsonSchemaValue]] = None,
     options: Optional[Union[Mapping[str, Any], Options]] = None,
     keep_alive: Optional[Union[float, str]] = None,
   ) -> Iterator[ChatResponse]: ...
@@ -292,7 +292,7 @@ class Client(BaseClient):
     *,
     tools: Optional[Sequence[Union[Mapping[str, Any], Tool, Callable]]] = None,
     stream: bool = False,
-    format: Optional[Union[Literal['', 'json'], JsonSchemaValue]] = None,
+    format: Optional[Union[Literal['json'], JsonSchemaValue]] = None,
     options: Optional[Union[Mapping[str, Any], Options]] = None,
     keep_alive: Optional[Union[float, str]] = None,
   ) -> Union[ChatResponse, Iterator[ChatResponse]]:
@@ -753,7 +753,7 @@ class AsyncClient(BaseClient):
         stream=stream,
         raw=raw,
         format=format,
-        images=[image for image in _copy_images(images)] if images else None,
+        images=[Image(value=image) for image in images] if images else None,
         options=options,
         keep_alive=keep_alive,
       ).model_dump(exclude_none=True),
@@ -1121,15 +1121,10 @@ class AsyncClient(BaseClient):
     )
 
 
-def _copy_images(images: Optional[Sequence[Union[Image, Any]]]) -> Iterator[Image]:
-  for image in images or []:
-    yield image if isinstance(image, Image) else Image(value=image)
-
-
 def _copy_messages(messages: Optional[Sequence[Union[Mapping[str, Any], Message]]]) -> Iterator[Message]:
   for message in messages or []:
     yield Message.model_validate(
-      {k: [image for image in _copy_images(v)] if k == 'images' else v for k, v in dict(message).items() if v},
+      {k: [Image(value=image) for image in v] if k == 'images' else v for k, v in dict(message).items() if v},
     )
 
 
